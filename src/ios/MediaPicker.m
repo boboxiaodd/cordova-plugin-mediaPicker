@@ -57,7 +57,7 @@
                 if(asset.mediaType==PHAssetMediaTypeImage){
                     [self imageToSandbox:asset dmcPickerPath:dmcPickerPath aListArray:aListArray selectArray:selectArray index:index];
                 }else{
-                    [self videoToSandbox:asset dmcPickerPath:dmcPickerPath aListArray:aListArray selectArray:selectArray index:index];
+                    [self videoToSandboxCompress:asset dmcPickerPath:dmcPickerPath aListArray:aListArray selectArray:selectArray index:index];
                 }
             }
             index++;
@@ -152,36 +152,43 @@
 }
 
 -(void)videoToSandboxCompress:(PHAsset *)asset dmcPickerPath:(NSString*)dmcPickerPath aListArray:(NSMutableArray*)aListArray selectArray:(NSMutableArray*)selectArray index:(int)index{
+    PHVideoRequestOptions *options = [[PHVideoRequestOptions alloc] init];
+    options.networkAccessAllowed = YES;
     NSString *compressStartjs = [NSString stringWithFormat:@"MediaPicker.compressEvent('%@',%i)", @"start",index];
     [self.commandDelegate evalJs:compressStartjs];
-    [[PHImageManager defaultManager] requestExportSessionForVideo:asset options:nil exportPreset:AVAssetExportPresetMediumQuality resultHandler:^(AVAssetExportSession *exportSession, NSDictionary *info) {
+    
+    [[PHImageManager defaultManager] requestExportSessionForVideo:asset options:options exportPreset:AVAssetExportPresetHighestQuality resultHandler:^(AVAssetExportSession *exportSession, NSDictionary *info) {
         
 
         NSString *fullpath=[NSString stringWithFormat:@"%@/%@.%@", dmcPickerPath,[[NSProcessInfo processInfo] globallyUniqueString], @"mp4"];
         NSURL *outputURL = [NSURL fileURLWithPath:fullpath];
         
         NSLog(@"this is the final path %@",outputURL);
-        
         exportSession.outputFileType=AVFileTypeMPEG4;
-        
         exportSession.outputURL=outputURL;
 
         [exportSession exportAsynchronouslyWithCompletionHandler:^{
 
             if (exportSession.status == AVAssetExportSessionStatusFailed) {
-               [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"compress failed"] callbackId:callbackId];
+                [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"compress failed"] callbackId:self->callbackId];
                 NSLog(@"failed");
                 
             } else if(exportSession.status == AVAssetExportSessionStatusCompleted){
                 
-                NSLog(@"completed!");
+                NSDictionary *dictionary = [NSDictionary dictionaryWithContentsOfFile:outputURL.absoluteString];
+                NSLog(@"completed! %llu",dictionary.fileSize);
                 NSString *compressCompletedjs = [NSString stringWithFormat:@"MediaPicker.compressEvent('%@',%i)", @"completed",index];
                 [self.commandDelegate evalJs:compressCompletedjs];
+                
+                NSData *data = [NSData dataWithContentsOfURL:outputURL options:NSDataReadingUncached error:nil];
+                
+                NSNumber* size=[NSNumber numberWithLong: data.length];
+                
                 PHAsset *asset = selectArray[index];
-                NSDictionary *dict=[NSDictionary dictionaryWithObjectsAndKeys:fullpath,@"path",[[NSURL fileURLWithPath:fullpath] absoluteString],@"uri",@"video",@"mediaType" ,[NSNumber numberWithInt:index],@"index", [NSString stringWithFormat:@"%f",asset.duration], @"duration", nil];
+                NSDictionary *dict=[NSDictionary dictionaryWithObjectsAndKeys:fullpath,@"path",[[NSURL fileURLWithPath:fullpath] absoluteString],@"uri",@"video",@"mediaType" ,[NSNumber numberWithInt:index],@"index", [NSString stringWithFormat:@"%f",asset.duration], @"duration", size, @"size", nil];
                 [aListArray addObject:dict];
                 if([aListArray count]==[selectArray count]){
-                    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:aListArray] callbackId:callbackId];
+                    [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray:aListArray] callbackId:self->callbackId];
                 }
             }
             
